@@ -9,3 +9,7 @@ output_vis/
 # Ignora lixo do Python e Jupyter
 __pycache__/
 .ipynb_checkpoints/
+
+*.nc
+
+venv/
