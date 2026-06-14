@@ -96,6 +96,7 @@ def get_ocean_var(
         print('Data Type: float32')
 
     data = db.read(time=time, x=x, y=y, quality=quality, z=z)
+    print(f'dataset shape: {data.shape}')
     return data
 
 

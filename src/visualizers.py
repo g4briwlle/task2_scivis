@@ -1,20 +1,28 @@
 """ Functions to create visualizations to html
 """
+from data_loader import *
+from utils import *
 
 import numpy as np
-import pandas as pd
-import OpenVisus as ov
 import matplotlib.pyplot as plt
-import seaborn as sns
 from mpl_toolkits.axes_grid1 import make_axes_locatable
 import cartopy.crs as ccrs
-import cartopy.feature as cfeature
 import pyvista as pv
-import trame
 import xarray as xr
+
+import sys
+from unittest.mock import MagicMock
+
+# Criando bibliotecas "fantasmas" para enganar o import
+sys.modules['esmpy'] = MagicMock()
+sys.modules['ESMF'] = MagicMock()
+sys.modules['xesmf'] = MagicMock()
+#sys.modules['xmitgcm'] = MagicMock()
+#sys.modules['xgcm'] = MagicMock()
+
+# cubedsphere vai passar direto pelo erro
 import cubedsphere as cs
 
-from utils import *
 
 def viz_qv_wind_face_grid(qv, u, v, face, time):
 
@@ -244,3 +252,87 @@ def viz_qv_3d(qv, R_sphere, lon, lat, face, time):
 
   plotter.add_text(f"DYAMOND QV - Face {face}, Time {time}", font_size=12)
   plotter.show()
+
+
+def viz_ocean_3d_slices(data, variable_name: str, x: list[int], y: list[int], z: list[int]):
+  print('Opening ocean lat/lon file')
+  latlon_grid = xr.open_dataset('llc2160_latlon.nc')
+
+  lon_2d = latlon_grid['longitude'].values # matrix 2D
+  lat_2d = latlon_grid['latitude'].values
+
+  print('making cuts')
+  # setting cutting points
+  x_start, x_end = x[0], x[1]
+  y_start, y_end = y[0], y[1]
+
+  # getting wanted cut for lat/lon
+  lon_cut = lon_2d[y_start:y_end, x_start:x_end]
+  lat_cut = lat_2d[y_start:y_end, x_start:x_end]
+
+  # getting data dimensions
+  nz, ny, nx = data.shape
+
+  print('creating rc file')
+  # creating depth in center of cels, "RC" missing file
+  n_levels = 90
+  total_depth = 7000
+  dz_min = 1.0                
+  dz_max = 480.0
+  k = np.linspace(-2.0, 2.5, n_levels)
+  dz = dz_min + (dz_max - dz_min) * (0.5 * (1 + np.tanh(k)))
+
+  fator_correcao = total_depth / np.sum(dz)
+  dz = dz * fator_correcao
+
+  z_interfaces = np.zeros(n_levels + 1)
+  print("starting z interfaces")
+  for i in range(n_levels):
+      z_interfaces[i+1] = z_interfaces[i] - dz[i]
+
+  Z_1d_real = z_interfaces[:-1] - (dz / 2)
+
+  print(f"Espessura da 1ª camada (dz): {dz[0]:.2f} m")
+  print(f"Profundidade do centro da 1ª camada: {Z_1d_real[0]:.2f} m")
+
+  print(f"\nEspessura da última camada (dz): {dz[-1]:.2f} m")
+  print(f"Profundidade do centro da última camada: {Z_1d_real[-1]:.2f} m")
+  print(f"Fundo do oceano real (última interface): {z_interfaces[-1]:.2f} m")
+
+
+  ### getting to 3d from 2d
+  # building coordenate matrices
+  X_3d = np.zeros((nz, ny, nx))
+  Y_3d = np.zeros((nz, ny, nx))
+  Z_3d = np.zeros((nz, ny, nx))
+
+  # iter in depth layers
+  for i in range(nz):
+    X_3d[i, :, :] = lon_cut           
+    Y_3d[i, :, :] = lat_cut
+    Z_3d[i, :, :] = Z_1d_real[i]
+
+  print("initializing pyvista grid")
+  grid = pv.StructuredGrid(X_3d, Y_3d, Z_3d)
+  grid[variable_name] = data.flatten(order='F')
+
+
+  pv.set_jupyter_backend('trame')
+  plotter = pv.Plotter(notebook=True)
+
+
+  plotter.add_mesh_slice_orthogonal(
+    grid, 
+    scalars=variable_name, 
+    cmap="coolwarm",
+    show_edges=False
+)
+  plotter.add_axes()
+  plotter.set_scale(zscale=0.1)
+  plotter.show()
+
+  plotter.export_html('visualizacao_3d.html')
+
+if __name__ == '__main__':
+  theta = get_ocean_var('theta', time=0, quality=0, x=[0, 400], y=[2000, 2300], z=[0, 9], to_print=True)
+  viz_ocean_3d_slices(theta, 'theta', x=[0,400], y=[2000, 2300], z=[0,9])
